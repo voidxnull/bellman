@@ -14,23 +14,20 @@ mod log;
 pub mod domain;
 pub mod groth16;
 
-#[cfg(feature = "gm17")]
-pub mod gm17;
-#[cfg(feature = "sonic")]
-pub mod sonic;
-
 mod group;
-pub mod source;
 mod multiexp;
+pub mod source;
 
 #[cfg(test)]
 mod tests;
 
 cfg_if! {
-    if #[cfg(feature = "multicore")] {
-        #[cfg(feature = "wasm")]
-        compile_error!("Multicore feature is not yet compatible with wasm target arch");
-
+    if #[cfg(feature = "wasm")] {
+        mod wasm_multicore;
+        pub mod worker {
+            pub use crate::wasm_multicore::*;
+        }
+    } else if #[cfg(feature = "multicore")] {
         mod multicore;
         pub mod worker {
             pub use crate::multicore::*;

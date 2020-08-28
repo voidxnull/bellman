@@ -21,7 +21,7 @@ extern crate futures;
 use self::futures::future::{join_all, JoinAll};
 use self::futures::executor::block_on;
 
-use super::worker::{Worker, WorkerFuture};
+use super::worker::Worker;
 
 use super::SynthesisError;
 
@@ -65,12 +65,13 @@ fn multiexp_inner<Q, D, G, S>(
     exponents: Arc<Vec<<G::Scalar as PrimeField>::Repr>>,
     skip: u32,
     c: u32,
-    handle_trivial: bool
-) -> WorkerFuture< <G as CurveAffine>::Projective, SynthesisError>
-    where for<'a> &'a Q: QueryDensity,
-          D: Send + Sync + 'static + Clone + AsRef<Q>,
-          G: CurveAffine,
-          S: SourceBuilder<G>
+    handle_trivial: bool,
+) -> impl Future<Output = Result<<G as CurveAffine>::Projective, SynthesisError>>
+where
+    for<'a> &'a Q: QueryDensity,
+    D: Send + Sync + 'static + Clone + AsRef<Q>,
+    G: CurveAffine,
+    S: SourceBuilder<G>,
 {
     // Perform this region of the multiexp
     let this = {
@@ -173,7 +174,7 @@ cfg_if! {
             skip: u32,
             c: u32,
             handle_trivial: bool
-        ) -> WorkerFuture< <G as CurveAffine>::Projective, SynthesisError>
+        ) -> impl Future<Output = Result<<G as CurveAffine>::Projective, SynthesisError>>
             where for<'a> &'a Q: QueryDensity,
                 D: Send + Sync + 'static + Clone + AsRef<Q>,
                 G: CurveAffine,
@@ -197,12 +198,13 @@ fn multiexp_inner_with_prefetch<Q, D, G, S>(
     exponents: Arc<Vec<<G::Scalar as PrimeField>::Repr>>,
     skip: u32,
     c: u32,
-    handle_trivial: bool
-) -> WorkerFuture< <G as CurveAffine>::Projective, SynthesisError>
-    where for<'a> &'a Q: QueryDensity,
-          D: Send + Sync + 'static + Clone + AsRef<Q>,
-          G: CurveAffine,
-          S: SourceBuilder<G>
+    handle_trivial: bool,
+) -> impl Futrure<Option = Result<<G as CurveAffine>::Projective, SynthesisError>>
+where
+    for<'a> &'a Q: QueryDensity,
+    D: Send + Sync + 'static + Clone + AsRef<Q>,
+    G: CurveAffine,
+    S: SourceBuilder<G>,
 {
     use prefetch::prefetch::*;
     // Perform this region of the multiexp
@@ -294,12 +296,13 @@ pub fn multiexp<Q, D, G, S>(
     pool: &Worker,
     bases: S,
     density_map: D,
-    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>
-) -> ChunksJoiner< <G as CurveAffine>::Projective >
-    where for<'a> &'a Q: QueryDensity,
-          D: Send + Sync + 'static + Clone + AsRef<Q>,
-          G: CurveAffine,
-          S: SourceBuilder<G>
+    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>,
+) -> ChunksJoiner<G::Projective, impl Future<Output = Result<G::Projective, SynthesisError>>>
+where
+    for<'a> &'a Q: QueryDensity,
+    D: Send + Sync + 'static + Clone + AsRef<Q>,
+    G: CurveAffine,
+    S: SourceBuilder<G>,
 {
     let c = if exponents.len() < 32 {
         3u32
@@ -336,23 +339,24 @@ pub fn multiexp<Q, D, G, S>(
     } 
 }
 
-pub struct ChunksJoiner<G: CurveProjective> {
-    join: JoinAll< WorkerFuture<G, SynthesisError> >,
-    c: u32
+pub struct ChunksJoiner<G: CurveProjective, F: Future<Output = Result<G, SynthesisError>>> {
+    join: JoinAll<F>,
+    c: u32,
 }
 
-impl<G: CurveProjective> Future for ChunksJoiner<G> {
+impl<G: CurveProjective, F: Future<Output = Result<G, SynthesisError>>> Future
+    for ChunksJoiner<G, F>
+{
     type Output = Result<G, SynthesisError>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output>
-    {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let c = self.as_ref().c;
         let join = unsafe { self.map_unchecked_mut(|s| &mut s.join) };
         match join.poll(cx) {
             Poll::Ready(v) => {
                 let v = join_chunks(v, c);
                 return Poll::Ready(v);
-            },
+            }
             Poll::Pending => {
                 return Poll::Pending;
             }
@@ -360,14 +364,16 @@ impl<G: CurveProjective> Future for ChunksJoiner<G> {
     }
 }
 
-impl<G: CurveProjective> ChunksJoiner<G> {
+impl<G: CurveProjective, F: Future<Output = Result<G, SynthesisError>>> ChunksJoiner<G, F> {
     pub fn wait(self) -> <Self as Future>::Output {
         block_on(self)
     }
 }
 
-fn join_chunks<G: CurveProjective>
-    (chunks: Vec<Result<G, SynthesisError>>, c: u32) -> Result<G, SynthesisError> {
+fn join_chunks<G: CurveProjective>(
+    chunks: Vec<Result<G, SynthesisError>>,
+    c: u32,
+) -> Result<G, SynthesisError> {
     if chunks.len() == 0 {
         return Ok(G::zero());
     }
