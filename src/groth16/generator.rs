@@ -11,7 +11,7 @@ use crate::pairing::{
     CurveAffine
 };
 
-use crate::pairing::ff::{    
+use crate::pairing::ff::{
     PrimeField,
     Field
 };
@@ -252,22 +252,31 @@ pub fn generate_parameters<E, C>(
 
         let _stopwatch = Stopwatch::new();
 
-        {
-            let powers_of_tau = powers_of_tau.as_mut();
-            worker.scope(powers_of_tau.len(), |scope, chunk| {
-                for (i, powers_of_tau) in powers_of_tau.chunks_mut(chunk).enumerate()
-                {
-                    scope.spawn(move |_| {
-                        let mut current_tau_power = tau.pow(&[(i*chunk) as u64]);
 
-                        for p in powers_of_tau {
-                            p.0 = current_tau_power;
-                            current_tau_power.mul_assign(&tau);
-                        }
-                    });
-                }
-            });
-        }
+        // worker.scope(powers_of_tau.len(), |scope, chunk| {
+        //     for (i, powers_of_tau) in powers_of_tau.chunks_mut(chunk).enumerate()
+        //     {
+        //         scope.spawn(move |_| {
+        //             let mut current_tau_power = tau.pow(&[(i*chunk) as u64]);
+        //
+        //             for p in powers_of_tau {
+        //                 p.0 = current_tau_power;
+        //                 current_tau_power.mul_assign(&tau);
+        //             }
+        //         });
+        //     }
+        // });
+
+        let powers_of_tau = worker.parallel_map(powers_of_tau, |chunk_idx, powers_of_tau| {
+            let mut current_tau_power = tau.pow(&[(i*chunk) as u64]);
+
+            powers_of_tau.into_iter().map(|p| {
+                p.0 = current_tau_power;
+                current_tau_power.mul_assign(&tau);
+                p
+            }).collect();
+        });
+
         elog_verbose!("powers of tau stage 1 done in {} s", _stopwatch.elapsed());
 
         // coeff = t(x) / delta
@@ -319,7 +328,7 @@ pub fn generate_parameters<E, C>(
     let mut l = vec![E::G1::zero(); assembly.num_aux];
 
     elog_verbose!("evaluating polynomials...");
-    
+
     let _stopwatch = Stopwatch::new();
 
     fn eval<E: Engine>(

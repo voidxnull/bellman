@@ -1,12 +1,11 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 #[macro_use]
-
 extern crate cfg_if;
-pub extern crate pairing;
-extern crate rand;
 extern crate bit_vec;
 extern crate byteorder;
+pub extern crate pairing;
+extern crate rand;
 
 #[macro_use]
 mod log;
@@ -14,23 +13,20 @@ mod log;
 pub mod domain;
 pub mod groth16;
 
-#[cfg(feature = "gm17")]
-pub mod gm17;
-#[cfg(feature = "sonic")]
-pub mod sonic;
-
 mod group;
-pub mod source;
 mod multiexp;
+pub mod source;
 
 #[cfg(test)]
 mod tests;
 
 cfg_if! {
-    if #[cfg(feature = "multicore")] {
-        #[cfg(feature = "wasm")]
-        compile_error!("Multicore feature is not yet compatible with wasm target arch");
-
+    if #[cfg(feature = "wasm")] {
+        mod wasm_multicore;
+        pub mod worker {
+            pub use crate::wasm_multicore::*;
+        }
+    } else if #[cfg(feature = "multicore")] {
         mod multicore;
         pub mod worker {
             pub use crate::multicore::*;
@@ -46,10 +42,10 @@ cfg_if! {
 mod cs;
 pub use self::cs::*;
 
-use std::str::FromStr;
 use std::env;
+use std::str::FromStr;
 
-cfg_if!{
+cfg_if! {
     if #[cfg(any(not(feature = "nolog"), feature = "sonic"))] {
         fn verbose_flag() -> bool {
             option_env!("BELLMAN_VERBOSE").unwrap_or("0") == "1"
